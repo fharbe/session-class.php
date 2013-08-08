@@ -1,7 +1,7 @@
 <?php
 class session {
-	private $data = array();
-	private $ip;
+	public $data = array();
+	public $ip;
 	private static $config;
 	private static $db;
 	private static $started = false;
@@ -26,38 +26,9 @@ class session {
 			self::$started = true;
 		}
 	}
-    public function count() {
-		if(!array_key_exists('count', $this->data)){
-			$query = self::$db->query("SELECT id FROM ".self::$config['table']."");
-			$this->data['count'] = self::$db->count($query);
-		}
-		return $this->data['count'];
-    }
-    public function open($save_path, $session_name) {
-        return true;
-    }
-    public function close() {
-		self::gc(self::$config['maxlifetime']);
-        return true;
-    }
-    public function read($id) {
-		$query = self::$db->query("
-			SELECT
-				data
-			FROM
-				".self::$config['table']."
-			WHERE
-				id = '".$id."' AND
-				ip = '".$this->ip."' AND
-                timestamp > '".(time() - self::$config['maxlifetime'])."' LIMIT 1
-		");
-        while ($row = self::$db->fetch_array($query)) {
-			return $row['data'];
-        }
-        return "";
-    }
-    public function write($id, $data) {
+	private function update() {
 		$time = time();
+		$id = session_id();
 		self::$db->query("
 			INSERT INTO 
 				".self::$config['table']."
@@ -70,16 +41,55 @@ class session {
 			VALUES (
 				'".$id."',
 				'".$this->ip."',
-				'".$data."',
+				'".$this->data."',
 				'".$time."'
 			)
 			ON DUPLICATE KEY UPDATE
-				data = '".$data."',
+				".self::$config['table']."
+			SET
+				data = '".$this->data."',
 				timestamp = '".$time."'
 			WHERE 
 				id = '".$id."' AND
 				ip = '".$this->ip."'
 		");
+	}
+    public function count() {
+		if(!array_key_exists('count', $this->data)) {
+			$query = self::$db->query("SELECT id FROM ".self::$config['table']."");
+			$this->data['count'] = self::$db->count($query);
+		}
+		return $this->data['count'];
+    }
+    public function open($save_path, $session_key) {
+        return true;
+    }
+    public function close() {
+		$this->update();
+		$this->gc();
+        return true;
+    }
+    public function read($id) {
+		if(!count($this->data)) {
+			$query = self::$db->query("
+				SELECT
+					data
+				FROM
+					".self::$config['table']."
+				WHERE
+					id = '".$id."' AND
+					ip = '".$this->ip."' AND
+					timestamp > '".(time() - self::$config['maxlifetime'])."'
+				LIMIT 1
+			");
+			while($row = self::$db->fetch_array($query)) {
+				$this->data = $row['data'];
+			}
+		}
+		return $this->data || "";
+    }
+    public function write($id, $data) {
+		$this->data = $data;
 		return true;
     }
 	public function destroy($id) {
@@ -91,7 +101,7 @@ class session {
 		");
 		return true;
     }
-    public function gc($maxlifetime) {
+    public function gc($maxlifetime = false) {
 		self::$db->query("
 			DELETE FROM 
 				".self::$config['table']."
